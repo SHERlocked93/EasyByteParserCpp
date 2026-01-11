@@ -1,0 +1,9 @@
+build/
+install/
+.vscode/
+.idea/
+*.user
+*.swp
+*.DS_Store
+compile_commands.json
+.cache

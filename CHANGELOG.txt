@@ -1,0 +1,29 @@
+# Changelog
+
+
+## [v0.0.1] - 2026-01-11
+
+- **Core Functionality**:
+    - Parsing binary data based on INI configuration files.
+    - Support for standard types: `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `float`, `bool`.
+    - **Bit Fields**: Support for extracting values from specific bits using `BitOffset` and `BitCount`.
+    - **Endianness**: Configurable Big-Endian and Little-Endian parsing per field.
+    - **Scaling & Bias**: Automatic transformation of raw values (`y = x * scale + bias`).
+
+- **Configuration & Validation**:
+    - Header validation with `TotalLength`.
+    - Flexible `StartCode` and `CRC` definition:
+        - `StartCode` and `StartCodeLength` are now optional but must appear in pairs if used.
+        - `CRCAlgo` and `CRCLength` are now optional but must appear in pairs if used.
+    - Strict config checking:
+        - Overlap detection between fields, `StartCode`, `CRC` header region.
+        - Validation for field boundaries exceeding `TotalLength`.
+        - Warning system for mismatched optional header fields.
+
+- **Dependencies**:
+    - Integrated `mINI` for INI parsing.
+    - Integrated `nlohmann::json` for JSON serialization of parsed results.
+
+- **Build System**:
+    - CMake support for building the library and tests.
+    - Installation targets for library, headers, and CMake config files.
