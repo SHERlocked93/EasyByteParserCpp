@@ -1,6 +1,6 @@
 # EasyByteParserCpp
 
-EasyByteParserCpp is a lightweight, header-only(ish) C++17 library for parsing binary data based on INI configuration files. It is designed to be easy to use and extend.
+EasyByteParserCpp is a lightweight C++17 library for parsing binary data based on INI configuration files. It is designed to be easy to use and extend.
 
 ## Features
 
