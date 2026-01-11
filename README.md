@@ -73,9 +73,9 @@ int main() {
 ### Build Library
 
 ```bash
-mkdir build && cd build
-cmake ..
-make
+mkdir build && cd build && \
+cmake -DCMAKE_BUILD_TYPE=Release .. && \
+make && \
 sudo make install
 ```
 
@@ -84,9 +84,9 @@ sudo make install
 To build the tests, set `BUILD_TESTING=ON`:
 
 ```bash
-mkdir build && cd build
-cmake -DBUILD_TESTING=ON ..
-make
+mkdir build && cd build && \
+cmake -DBUILD_TESTING=ON .. && \
+make && \
 ctest
 ```
 
