@@ -245,6 +245,21 @@ std::map<std::string, ParsedValue> ByteParser::parse(const char* data, size_t si
                              std::to_string(totalLength_));
   }
 
+  // Start Code Check
+  if (!startCode_.empty()) {
+    if (size < startCode_.size()) {
+      throw std::runtime_error("Buffer too small for StartCode");
+    }
+    for (size_t i = 0; i < startCode_.size(); ++i) {
+      if (static_cast<uint8_t>(data[i]) != startCode_[i]) {
+        std::stringstream ss;
+        ss << "Invalid Start Code at byte " << i << ". Expected 0x" << std::hex << std::setw(2) << std::setfill('0')
+           << (int)startCode_[i] << " but got 0x" << (int)(uint8_t)data[i];
+        throw std::runtime_error(ss.str());
+      }
+    }
+  }
+
   // CRC Check
   if (!crcAlgo_.empty() && crcLength_ > 0) {
     if (size < crcLength_) {
