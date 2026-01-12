@@ -9,33 +9,34 @@
 #include <vector>
 
 namespace easy_byte_parser {
-
 class ParsedValue {
 public:
   using ValueType = std::variant<uint64_t, int64_t, double, bool, std::string>;
 
   ParsedValue() = default;
+
   ParsedValue(ValueType v) : value_(std::move(v)) {}
 
-  template <typename T> T get() const {
-    if constexpr (std::is_same_v<T, std::string>) {
+  template <typename T>
+  T get() const {
+    if constexpr (std::is_same_v<T, std::string>)
       return toString();
-    } else {
-      return std::visit(
-          [](auto &&arg) -> T {
-            using U = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<U, std::string>)
-              throw std::runtime_error(
-                  "Cannot convert string value to numeric type");
-            else
-              return static_cast<T>(arg);
-          },
-          value_);
-    }
+    return std::visit(
+        [](auto&& arg) -> T {
+          using U = std::decay_t<decltype(arg)>;
+          if constexpr (std::is_same_v<U, std::string>)
+            throw std::runtime_error("Cannot convert string value to numeric type");
+          else
+            return static_cast<T>(arg);
+        },
+        value_);
   }
 
-  std::string toString() const;
-  ValueType getValue() const { return value_; }
+  [[nodiscard]] std::string toString() const;
+
+  [[nodiscard]] ValueType getValue() const {
+    return value_;
+  }
 
 private:
   ValueType value_;
@@ -60,28 +61,42 @@ public:
   /// Load configuration from an INI file.
   /// Throws std::runtime_error if file not found or invalid format.
   /// \param configPath Path to the configuration file
-  void loadConfig(const std::string &configPath);
+  void loadConfig(const std::string& configPath);
 
   /// Parse a byte buffer according to loaded configuration.
   /// Throws std::runtime_error if buffer definition is invalid (too short).
   /// \param buffer Data buffer to parse
   /// \return Map of parsed values
-  std::map<std::string, ParsedValue> parse(const std::vector<char> &buffer);
+  std::map<std::string, ParsedValue> parse(const std::vector<char>& buffer);
 
   /// Parse a byte buffer according to loaded configuration.
   /// \param data Pointer to data buffer
   /// \param size Size of data buffer
   /// \return Map of parsed values
-  std::map<std::string, ParsedValue> parse(const char *data, size_t size);
+  std::map<std::string, ParsedValue> parse(const char* data, size_t size);
 
-  static std::string dumpRaw(const std::map<std::string, ParsedValue> &data);
-  static std::string dumpJson(const std::map<std::string, ParsedValue> &data);
+  static std::string dumpRaw(const std::map<std::string, ParsedValue>& data);
+  static std::string dumpJson(const std::map<std::string, ParsedValue>& data);
 
-  size_t getTotalLength() const { return totalLength_; }
-  const std::vector<uint8_t> &getStartCode() const { return startCode_; }
-  size_t getStartCodeLength() const { return startCodeLength_; }
-  std::string getCRCAlgo() const { return crcAlgo_; }
-  size_t getCRCLength() const { return crcLength_; }
+  [[nodiscard]] size_t getTotalLength() const {
+    return totalLength_;
+  }
+
+  [[nodiscard]] const std::vector<uint8_t>& getStartCode() const {
+    return startCode_;
+  }
+
+  [[nodiscard]] size_t getStartCodeLength() const {
+    return startCodeLength_;
+  }
+
+  [[nodiscard]] std::string getCRCAlgo() const {
+    return crcAlgo_;
+  }
+
+  [[nodiscard]] size_t getCRCLength() const {
+    return crcLength_;
+  }
 
 private:
   std::vector<uint8_t> startCode_;
@@ -91,5 +106,4 @@ private:
   size_t crcLength_ = 0;
   std::vector<FieldDefinition> fields_;
 };
-
 } // namespace easy_byte_parser
