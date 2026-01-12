@@ -274,12 +274,43 @@ ByteParser::parse(const std::vector<char> &buffer) {
 std::map<std::string, ParsedValue> ByteParser::parse(const char *data,
                                                      size_t size) {
   if (size < totalLength_) {
-    // Option: throw or return partial? Original threw only if accessed? No it
-    // iterated. Let's safe guard. throw std::runtime_error("Buffer size " +
-    // std::to_string(size) + " smaller than expected " +
-    // std::to_string(totalLength_)); Actually user might pass smaller buffer if
-    // it's a partial packet, but for parser logic we need full data designated
-    // by TotalLength
+    throw std::runtime_error("Buffer size " + std::to_string(size) +
+                             " smaller than expected TotalLength " +
+                             std::to_string(totalLength_));
+  }
+
+  // CRC Check
+  if (!crcAlgo_.empty() && crcLength_ > 0) {
+    if (size < crcLength_) {
+      throw std::runtime_error("Buffer too small for CRC check");
+    }
+
+    if (crcAlgo_ == "CRC16") {
+      if (crcLength_ != 2) {
+        throw std::runtime_error("CRC16 algorithm requires CRCLength=2");
+      }
+
+      // CRC is fixed at the very end of the packet defined by TotalLength
+      // Calculate CRC on data range: [0, TotalLength - CRCLength)
+      size_t dataLen = totalLength_ - crcLength_;
+
+      uint16_t calculated = utils::calculateCRC16Modbus(
+          reinterpret_cast<const uint8_t *>(data), dataLen);
+
+      const uint8_t *udata = reinterpret_cast<const uint8_t *>(data);
+      // CRC16 Modbus is usually Little Endian
+      // Location: [TotalLength - 2, TotalLength - 1]
+      size_t crcOffset = totalLength_ - 2;
+      uint16_t received = udata[crcOffset] | (udata[crcOffset + 1] << 8);
+
+      if (calculated != received) {
+        throw std::runtime_error(
+            "CRC Check Failed: calculated=" + std::to_string(calculated) +
+            ", received=" + std::to_string(received));
+      }
+    } else {
+      throw std::runtime_error("Unsupported CRC Algorithm: " + crcAlgo_);
+    }
   }
 
   std::map<std::string, ParsedValue> result;

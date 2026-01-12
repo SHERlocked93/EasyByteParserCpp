@@ -57,17 +57,21 @@ public:
   ByteParser() = default;
   ~ByteParser() = default;
 
-  /**
-   * @brief Load configuration from an INI file.
-   * Throws std::runtime_error if file not found or invalid format.
-   */
+  /// Load configuration from an INI file.
+  /// Throws std::runtime_error if file not found or invalid format.
+  /// \param configPath Path to the configuration file
   void loadConfig(const std::string &configPath);
 
-  /**
-   * @brief Parse a byte buffer according to loaded configuration.
-   * Throws std::runtime_error if buffer definition is invalid (too short).
-   */
+  /// Parse a byte buffer according to loaded configuration.
+  /// Throws std::runtime_error if buffer definition is invalid (too short).
+  /// \param buffer Data buffer to parse
+  /// \return Map of parsed values
   std::map<std::string, ParsedValue> parse(const std::vector<char> &buffer);
+
+  /// Parse a byte buffer according to loaded configuration.
+  /// \param data Pointer to data buffer
+  /// \param size Size of data buffer
+  /// \return Map of parsed values
   std::map<std::string, ParsedValue> parse(const char *data, size_t size);
 
   static std::string dumpRaw(const std::map<std::string, ParsedValue> &data);

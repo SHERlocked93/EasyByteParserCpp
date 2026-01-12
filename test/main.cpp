@@ -9,6 +9,21 @@
 
 using namespace easy_byte_parser;
 
+// Helper CRC for test (Modbus)
+uint16_t calcCRC(const std::vector<char> &data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= (uint8_t)data[i];
+    for (int j = 0; j < 8; ++j) {
+      if (crc & 1)
+        crc = (crc >> 1) ^ 0xA001;
+      else
+        crc >>= 1;
+    }
+  }
+  return crc;
+}
+
 void test_parsing() {
   std::cout << "Running test_parsing..." << std::endl;
   ByteParser parser;
@@ -24,6 +39,10 @@ void test_parsing() {
   std::vector<char> buffer(20, 0);
 
   // Fill data
+  // ByteOffset 0,1: StartCode=0203
+  buffer[0] = 0x02;
+  buffer[1] = 0x03;
+
   // ByteOffset 2: uint8 = 10
   buffer[2] = 10;
 
@@ -49,7 +68,28 @@ void test_parsing() {
   // Total = 1011 = 0x0B
   buffer[11] = 0x0B;
 
+  // Calculate CRC (Total 20, CRC 2 => Data 18)
+  uint16_t crc = calcCRC(buffer, 18);
+  buffer[18] = crc & 0xFF;
+  buffer[19] = (crc >> 8) & 0xFF;
+
   auto result = parser.parse(buffer);
+
+  // Test Invalid CRC
+  std::cout << "Testing Invalid CRC..." << std::endl;
+  auto bad_buffer = buffer;
+  bad_buffer[18] ^= 0xFF; // Corrupt CRC
+  bool caught = false;
+  try {
+    parser.parse(bad_buffer);
+  } catch (const std::exception &e) {
+    std::cout << "Caught expected CRC error: " << e.what() << std::endl;
+    caught = true;
+  }
+  if (!caught) {
+    std::cerr << "Failed to catch invalid CRC!" << std::endl;
+    std::exit(1);
+  }
 
   // Verify
   // Note: getValue return variant. We need to handle type correctly.
