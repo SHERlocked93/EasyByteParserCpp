@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.2] - 2026-01-12
+
+- Add CRC verify when ini config file provides CRC fields.
 
 ## [v0.0.1] - 2026-01-11
 

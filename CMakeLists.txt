@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(EasyByteParserCpp VERSION 0.0.1 LANGUAGES CXX)
+project(EasyByteParserCpp VERSION 0.0.2 LANGUAGES CXX)
 
 # Output directories settings
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
@@ -78,11 +78,11 @@ install(FILES
 option(BUILD_TESTING "Build tests" OFF)
 if(BUILD_TESTING)
   enable_testing()
-  
+
   add_executable(easy_byte_parser_test
     test/main.cpp
   )
-  
+
   target_link_libraries(easy_byte_parser_test
     PRIVATE ${PROJECT_NAME}
   )
@@ -90,7 +90,7 @@ if(BUILD_TESTING)
   # Copy config files
   file(GLOB TEST_CONFIGS "test/*.ini")
   file(COPY ${TEST_CONFIGS} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  
+
   add_test(NAME easy_byte_parser_test COMMAND easy_byte_parser_test)
 endif()
 
