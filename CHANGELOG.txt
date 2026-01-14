@@ -1,19 +1,26 @@
 # Changelog
 
+## [v0.0.3] - 2026-01-14
+
+- Core Functionality:
+    - Programmatic API: A new fluent interface for configuring the parser in C++ code, allowing dynamic runtime configuration without INI files.
+        - Supports template-based `addField<T>` for concise definition.
+    - Visual Checklist: Added `getConfigurationChecklist()` to print a detailed memory/field layout map for verification.
+
 ## [v0.0.2] - 2026-01-12
 
 - Add CRC verify when ini config file provides CRC fields.
 
 ## [v0.0.1] - 2026-01-11
 
-- **Core Functionality**:
+- Core Functionality:
     - Parsing binary data based on INI configuration files.
     - Support for standard types: `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `float`, `bool`.
-    - **Bit Fields**: Support for extracting values from specific bits using `BitOffset` and `BitCount`.
-    - **Endianness**: Configurable Big-Endian and Little-Endian parsing per field.
-    - **Scaling & Bias**: Automatic transformation of raw values (`y = x * scale + bias`).
+    - Bit Fields: Support for extracting values from specific bits using `BitOffset` and `BitCount`.
+    - Endianness: Configurable Big-Endian and Little-Endian parsing per field.
+    - Scaling & Bias: Automatic transformation of raw values (`y = x * scale + bias`).
 
-- **Configuration & Validation**:
+- Configuration & Validation:
     - Header validation with `TotalLength`.
     - Flexible `StartCode` and `CRC` definition:
         - `StartCode` and `StartCodeLength` are now optional but must appear in pairs if used.
@@ -23,10 +30,10 @@
         - Validation for field boundaries exceeding `TotalLength`.
         - Warning system for mismatched optional header fields.
 
-- **Dependencies**:
+- Dependencies:
     - Integrated `mINI` for INI parsing.
     - Integrated `nlohmann::json` for JSON serialization of parsed results.
 
-- **Build System**:
+- Build System:
     - CMake support for building the library and tests.
     - Installation targets for library, headers, and CMake config files.

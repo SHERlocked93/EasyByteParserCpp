@@ -10,7 +10,7 @@
 
 namespace easy_byte_parser {
 class ParsedValue {
-public:
+ public:
   using ValueType = std::variant<uint64_t, int64_t, double, bool, std::string>;
 
   ParsedValue() = default;
@@ -19,8 +19,7 @@ public:
 
   template <typename T>
   T get() const {
-    if constexpr (std::is_same_v<T, std::string>)
-      return toString();
+    if constexpr (std::is_same_v<T, std::string>) return toString();
     return std::visit(
         [](auto&& arg) -> T {
           using U = std::decay_t<decltype(arg)>;
@@ -38,7 +37,7 @@ public:
     return value_;
   }
 
-private:
+ private:
   ValueType value_;
 };
 
@@ -53,8 +52,44 @@ struct FieldDefinition {
   double bias = 0.0;
 };
 
+// Type Traits Helper for template addField
+template <typename T>
+struct TypeName;
+template <>
+struct TypeName<uint8_t> {
+  static constexpr const char* value = "uint8";
+};
+template <>
+struct TypeName<int8_t> {
+  static constexpr const char* value = "int8";
+};
+template <>
+struct TypeName<uint16_t> {
+  static constexpr const char* value = "uint16";
+};
+template <>
+struct TypeName<int16_t> {
+  static constexpr const char* value = "int16";
+};
+template <>
+struct TypeName<uint32_t> {
+  static constexpr const char* value = "uint32";
+};
+template <>
+struct TypeName<int32_t> {
+  static constexpr const char* value = "int32";
+};
+template <>
+struct TypeName<float> {
+  static constexpr const char* value = "float";
+};
+template <>
+struct TypeName<bool> {
+  static constexpr const char* value = "bool";
+};
+
 class ByteParser {
-public:
+ public:
   ByteParser() = default;
   ~ByteParser() = default;
 
@@ -62,6 +97,46 @@ public:
   /// Throws std::runtime_error if file not found or invalid format.
   /// \param configPath Path to the configuration file
   void loadConfig(const std::string& configPath);
+
+  // --- Programmatic API ---
+
+  /// Set the total expected length of the packet.
+  ByteParser& setTotalLength(size_t length);
+
+  /// Set the expected start code and its length.
+  ByteParser& setStartCode(const std::vector<uint8_t>& code, size_t length);
+
+  /// Set the CRC algorithm and validation field length.
+  ByteParser& setCRC(const std::string& algo, size_t length);
+
+  /// Manually add a field definition.
+  ByteParser& addField(const FieldDefinition& definition);
+
+  /// Convenience template method to add a field with inferred type string.
+  /// Usage: parser.addField<float>("MyFloat", 4, ...);
+  template <typename T>
+  ByteParser& addField(const std::string& name, size_t byteOffset, size_t bitOffset = 0, size_t bitCount = 0,
+                       bool isBigEndian = true, double scale = 1.0, double bias = 0.0) {
+    FieldDefinition fd;
+    fd.name = name;
+    fd.byteOffset = byteOffset;
+    fd.bitOffset = bitOffset;
+    fd.bitCount = bitCount;
+    fd.type = TypeName<T>::value;
+    fd.isBigEndian = isBigEndian;
+    fd.scale = scale;
+    fd.bias = bias;
+    return addField(fd);
+  }
+
+  /// Clear all current configurations.
+  void clear();
+
+  /// Validate the current configuration for overlaps and constraints.
+  /// Called automatically by parse() if configuration changed.
+  void validateConfig() const;
+
+  // ------------------------
 
   /// Parse a byte buffer according to loaded configuration.
   /// Throws std::runtime_error if buffer definition is invalid (too short).
@@ -77,6 +152,9 @@ public:
 
   static std::string dumpRaw(const std::map<std::string, ParsedValue>& data);
   static std::string dumpJson(const std::map<std::string, ParsedValue>& data);
+
+  /// Generate a visual checklist of the current configuration.
+  [[nodiscard]] std::string getConfigurationChecklist() const;
 
   [[nodiscard]] size_t getTotalLength() const {
     return totalLength_;
@@ -98,7 +176,7 @@ public:
     return crcLength_;
   }
 
-private:
+ private:
   std::vector<uint8_t> startCode_;
   size_t startCodeLength_ = 0;
   size_t totalLength_ = 0;
@@ -106,4 +184,4 @@ private:
   size_t crcLength_ = 0;
   std::vector<FieldDefinition> fields_;
 };
-} // namespace easy_byte_parser
+}  // namespace easy_byte_parser

@@ -3,6 +3,7 @@
 #include "Utils.hpp"
 
 #define MINI_CASE_SENSITIVE
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -14,6 +15,7 @@
 #include "3rdparty/nlohmann/json.hpp"
 
 namespace easy_byte_parser {
+
 std::string ParsedValue::toString() const {
   return std::visit(
       [](auto&& arg) -> std::string {
@@ -40,221 +42,223 @@ static size_t getTypeSize(const std::string& t) {
   return 0;
 }
 
+// --- Programmatic API Implementation ---
+
+ByteParser& ByteParser::setTotalLength(size_t length) {
+  totalLength_ = length;
+  return *this;
+}
+
+ByteParser& ByteParser::setStartCode(const std::vector<uint8_t>& code, size_t length) {
+  startCode_ = code;
+  startCodeLength_ = length;
+  return *this;
+}
+
+ByteParser& ByteParser::setCRC(const std::string& algo, size_t length) {
+  crcAlgo_ = algo;
+  crcLength_ = length;
+  return *this;
+}
+
+ByteParser& ByteParser::addField(const FieldDefinition& definition) {
+  // Basic sanity check on type
+  if (!isValidType(definition.type)) {
+    throw std::runtime_error("[EasyByteParserCpp]: Invalid type for field " + definition.name + ": " + definition.type);
+  }
+  fields_.push_back(definition);
+  return *this;
+}
+
+void ByteParser::clear() {
+  totalLength_ = 0;
+  startCode_.clear();
+  startCodeLength_ = 0;
+  crcAlgo_.clear();
+  crcLength_ = 0;
+  fields_.clear();
+}
+
+void ByteParser::validateConfig() const {
+  if (totalLength_ == 0) {
+    throw std::runtime_error("[EasyByteParserCpp]: TotalLength must be greater than 0");
+  }
+
+  // Header Validation
+  if (!startCode_.empty()) {
+    if (startCode_.size() > startCodeLength_) {
+      throw std::runtime_error("[EasyByteParserCpp]: StartCode binary size exceeds StartCodeLength");
+    }
+  }
+
+  // CRC Validation
+  if (!crcAlgo_.empty()) {
+    if (crcAlgo_ == "CRC16" && crcLength_ != 2) {
+      throw std::runtime_error("[EasyByteParserCpp]: CRC16 algorithm requires CRCLength=2");
+    }
+  }
+
+  // Bounds & Overlap Validation (Bit-level precision)
+  std::vector<int> bitOwner(totalLength_ * 8, -1);  // -1: unused, >=0: field index, -2: CRC
+
+  // Mark CRC region
+  if (!crcAlgo_.empty() && crcLength_ > 0) {
+    if (totalLength_ >= crcLength_) {
+      size_t crcStartBits = (totalLength_ - crcLength_) * 8;
+      for (size_t i = crcStartBits; i < totalLength_ * 8; ++i) bitOwner[i] = -2;
+    }
+  }
+
+  for (size_t i = 0; i < fields_.size(); ++i) {
+    const auto& f = fields_[i];
+    size_t sz = getTypeSize(f.type);
+
+    // Bounds check (Byte level first for simplicity)
+    if (f.byteOffset + sz > totalLength_) {
+      throw std::runtime_error("[EasyByteParserCpp]: Field " + f.name + " exceeds TotalLength");
+    }
+
+    // Determine Bit Range
+    size_t startBit = f.byteOffset * 8;
+    size_t endBit = startBit + sz * 8;
+
+    if (f.bitCount > 0) {
+      size_t typeBits = sz * 8;
+      if (f.bitOffset + f.bitCount > typeBits) {
+        throw std::runtime_error("[EasyByteParserCpp]: Bit logic exceeds type width for field " + f.name);
+      }
+      startBit = f.byteOffset * 8 + f.bitOffset;
+      endBit = startBit + f.bitCount;
+    }
+
+    // Check overlap
+    for (size_t b = startBit; b < endBit; ++b) {
+      if (b >= totalLength_ * 8)
+        throw std::runtime_error("[EasyByteParserCpp]: Field " + f.name +
+                                 " out of bounds");  // Should be caught by byte check usually
+
+      int owner = bitOwner[b];
+      if (owner != -1) {
+        if (owner == -2)
+          throw std::runtime_error("[EasyByteParserCpp]: Field " + f.name + " overlaps with CRC");
+        else
+          throw std::runtime_error("[EasyByteParserCpp]: Overlap detected for field " + f.name);
+      }
+      bitOwner[b] = (int)i;
+    }
+  }
+}
+
+// --- Legacy / INI Loader ---
+
 void ByteParser::loadConfig(const std::string& configPath) {
+  clear();  // Reset first
+
   mINI::INIFile file(configPath);
   mINI::INIStructure ini;
 
   if (!file.read(ini)) {
-    throw std::runtime_error("Config file not found or unreadable or invalid INI: " + configPath);
+    throw std::runtime_error("[EasyByteParserCpp]: Config file not found or unreadable or invalid INI: " + configPath);
   }
 
   // 1. Header
   if (!ini.has("Header")) {
-    throw std::runtime_error("Missing [Header] section in " + configPath);
+    throw std::runtime_error("[EasyByteParserCpp]: Missing [Header] section in " + configPath);
   }
 
   auto& header = ini["Header"];
 
-  // Strict Pairing Check for StartCode / StartCodeLength
+  if (!header.has("TotalLength")) throw std::runtime_error("[EasyByteParserCpp]: Missing Header.TotalLength");
+  setTotalLength(std::stoul(header["TotalLength"]));
+
+  // StartCode
   bool hasSC = header.has("StartCode");
   bool hasSCL = header.has("StartCodeLength");
 
-  startCode_.clear();
-  startCodeLength_ = 0;
-
   if (hasSC != hasSCL) {
-    std::cerr << "Warning: StartCode and StartCodeLength must appear in pairs. "
-                 "Discarding StartCode configuration.\n";
+    std::cerr << "[EasyByteParserCpp Warning]: StartCode and StartCodeLength must appear in pairs.\n";
   } else if (hasSC) {
-    // Both present
     std::string hexCode = header["StartCode"];
+    std::vector<uint8_t> sc;
     for (size_t i = 0; i < hexCode.length(); i += 2) {
       if (i + 1 >= hexCode.length()) break;
       std::string byteStr = hexCode.substr(i, 2);
       try {
-        startCode_.push_back(static_cast<uint8_t>(std::stoul(byteStr, nullptr, 16)));
+        sc.push_back(static_cast<uint8_t>(std::stoul(byteStr, nullptr, 16)));
       } catch (...) {
-        throw std::runtime_error("Invalid StartCode hex: " + hexCode);
+        throw std::runtime_error("[EasyByteParserCpp]: Invalid StartCode hex: " + hexCode);
       }
     }
-
-    try {
-      startCodeLength_ = std::stoul(header["StartCodeLength"]);
-    } catch (...) {
-      throw std::runtime_error("Invalid StartCodeLength");
-    }
-
-    // Logic check: Header size vs Code size
-    if (startCode_.size() > startCodeLength_) {
-      throw std::runtime_error("StartCode binary size exceeds StartCodeLength");
-    }
+    size_t scl = std::stoul(header["StartCodeLength"]);
+    setStartCode(sc, scl);
   }
 
-  if (!header.has("TotalLength")) throw std::runtime_error("Missing Header.TotalLength");
-  try {
-    totalLength_ = std::stoul(header["TotalLength"]);
-  } catch (...) {
-    throw std::runtime_error("Invalid TotalLength");
-  }
-
-  // Strict Pairing Check for CRCAlgo / CRCLength
-  bool hasCRC = header.has("CRCAlgo");
-  bool hasCRCL = header.has("CRCLength");
-
-  crcAlgo_ = "";
-  crcLength_ = 0;
-
-  if (hasCRC != hasCRCL) {
-    std::cerr << "Warning: CRCAlgo and CRCLength must appear in pairs. "
-                 "Discarding CRC configuration."
-              << std::endl;
-  } else if (hasCRC) {
-    crcAlgo_ = header["CRCAlgo"];
-    try {
-      crcLength_ = std::stoul(header["CRCLength"]);
-    } catch (...) {
-      throw std::runtime_error("Invalid CRCLength");
-    }
+  // CRC
+  if (header.has("CRCAlgo") && header.has("CRCLength")) {
+    setCRC(header["CRCAlgo"], std::stoul(header["CRCLength"]));
   }
 
   // 2. Fields
-  fields_.clear();
+  for (auto const& it : ini) {
+    if (it.first == "Header") continue;
 
-  // Overlap Detection Map (BitMask per byte)
-  // 0xFF means fully occupied or utilized.
-  std::vector<uint8_t> usageMap(totalLength_, 0);
+    // Section name is Field Name
+    auto& section = it.second;
+    FieldDefinition fd;
+    fd.name = it.first;
 
-  // Mark StartCode Region
-  if (startCodeLength_ > 0) {
-    if (startCodeLength_ > totalLength_) throw std::runtime_error("StartCodeLength exceeds TotalLength");
-    for (size_t i = 0; i < startCodeLength_; ++i) usageMap[i] = 0xFF;
-  }
+    if (!section.has("ByteOffset"))
+      throw std::runtime_error("[EasyByteParserCpp]: Missing ByteOffset for field " + fd.name);
+    if (!section.has("Type")) throw std::runtime_error("[EasyByteParserCpp]: Missing Type for field " + fd.name);
 
-  // Mark CRC Region
-  if (crcLength_ > 0) {
-    if (crcLength_ > totalLength_) throw std::runtime_error("CRCLength exceeds TotalLength");
-    size_t crcStart = totalLength_ - crcLength_;
-    // Ensure CRC doesn't overlap StartCode (Header consistency)
-    if (startCodeLength_ > 0 && crcStart < startCodeLength_) {
-      throw std::runtime_error("CRCLength overlaps with StartCodeLength");
+    fd.byteOffset = std::stoul(section.get("ByteOffset"));  // const wrapper fix
+    fd.type = section.get("Type");
+
+    if (!isValidType(fd.type)) throw std::runtime_error("[EasyByteParserCpp]: Invalid Type: " + fd.type);
+
+    if (section.has("BitOffset")) fd.bitOffset = std::stoul(section.get("BitOffset"));
+    if (section.has("BitCount")) fd.bitCount = std::stoul(section.get("BitCount"));
+
+    if (section.has("Endian")) {
+      if (utils::toLower(section.get("Endian")) == "little")
+        fd.isBigEndian = false;
+      else
+        fd.isBigEndian = true;
     }
-    for (size_t i = crcStart; i < totalLength_; ++i) usageMap[i] = 0xFF;
+
+    if (section.has("Scale")) fd.scale = std::stod(section.get("Scale"));
+    if (section.has("Bias")) fd.bias = std::stod(section.get("Bias"));
+
+    addField(fd);
   }
 
-  // Iterate all sections
-  for (auto& [sectionName, collection] : ini) {
-    if (sectionName == "Header") continue;
-
-    // Check if it's a field (has ByteOffset)
-    if (collection.has("ByteOffset")) {
-      FieldDefinition f;
-      f.name = sectionName;
-
-      try {
-        f.byteOffset = std::stoul(collection.get("ByteOffset"));
-
-        if (collection.has("BitOffset")) f.bitOffset = std::stoul(collection.get("BitOffset"));
-        if (collection.has("BitCount")) f.bitCount = std::stoul(collection.get("BitCount"));
-
-        f.type = collection.has("Type") ? collection.get("Type") : "uint8";
-
-        if (!isValidType(f.type)) {
-          throw std::runtime_error("Field [" + sectionName + "] has invalid Type: " + f.type);
-        }
-
-        if (collection.has("Endian")) {
-          std::string end = utils::toLower(collection.get("Endian"));
-          f.isBigEndian = (end == "big");
-        }
-
-        if (collection.has("Scale")) f.scale = std::stod(collection.get("Scale"));
-        if (collection.has("Bias")) f.bias = std::stod(collection.get("Bias"));
-
-        size_t size = getTypeSize(f.type);
-        if (f.byteOffset + size > totalLength_) {
-          throw std::runtime_error("Field [" + sectionName + "] ByteOffset exceeds TotalLength");
-        }
-
-        // Bit Logic validation
-        size_t typeBits = size * 8;
-        if (f.bitCount > 0 && f.bitOffset + f.bitCount > typeBits) {
-          throw std::runtime_error("Field [" + sectionName + "] Bit logic exceeds type width");
-        }
-
-        // Overlap Detection Logic
-        uint64_t fieldFullMask = 0;
-        if (f.bitCount == 0) {
-          fieldFullMask = ~0ULL;
-        } else {
-          // Create mask: (1 << Count) - 1 << Offset
-          uint64_t ones = (f.bitCount == 64) ? ~0ULL : ((1ULL << f.bitCount) - 1);
-          fieldFullMask = ones << f.bitOffset;
-        }
-
-        for (size_t i = 0; i < size; ++i) {
-          size_t absByteIndex = f.byteOffset + i;
-
-          size_t bitStart;
-          if (f.isBigEndian) {
-            // MSB at first byte
-            size_t bytePosFromLSB = size - 1 - i;
-            bitStart = bytePosFromLSB * 8;
-          } else {
-            size_t bytePosFromLSB = i;
-            bitStart = bytePosFromLSB * 8;
-          }
-
-          // shift fieldFullMask to align bitStart to bit 0 of this byte
-          // extract bits [bitStart, bitStart+7] from fieldFullMask to byteMask [0, 7]
-          uint8_t byteMask = static_cast<uint8_t>((fieldFullMask >> bitStart) & 0xFF);
-
-          if (byteMask == 0) continue;
-
-          // Collision Check
-          if (usageMap[absByteIndex] & byteMask) {
-            std::string reason;
-            if (startCodeLength_ > 0 && absByteIndex < startCodeLength_) {
-              reason = "overlaps with StartCode header region";
-            } else if (crcLength_ > 0 && absByteIndex >= (totalLength_ - crcLength_)) {
-              reason = "overlaps with CRC tail region";
-            } else {
-              reason = "overlaps with another field";
-            }
-            throw std::runtime_error("Field [" + sectionName + "] collision: " + reason);
-          }
-
-          // Mark usage
-          usageMap[absByteIndex] |= byteMask;
-        }
-
-        fields_.push_back(f);
-      } catch (const std::exception& e) {
-        throw std::runtime_error("Error parsing field [" + sectionName + "]: " + e.what());
-      }
-    }
-  }
+  validateConfig();
 }
 
 std::map<std::string, ParsedValue> ByteParser::parse(const std::vector<char>& buffer) {
+  if (buffer.empty()) throw std::runtime_error("[EasyByteParserCpp]: Empty buffer");
   return parse(buffer.data(), buffer.size());
 }
 
 std::map<std::string, ParsedValue> ByteParser::parse(const char* data, size_t size) {
+  // Ensure valid configuration
+  validateConfig();
+
   if (size < totalLength_) {
-    throw std::runtime_error("Buffer size " + std::to_string(size) + " smaller than expected TotalLength " +
-                             std::to_string(totalLength_));
+    throw std::runtime_error("[EasyByteParserCpp]: Buffer size (" + std::to_string(size) +
+                             ") < Configured TotalLength (" + std::to_string(totalLength_) + ")");
   }
 
-  // Start Code Check
+  // StartCode Check
   if (!startCode_.empty()) {
     if (size < startCode_.size()) {
-      throw std::runtime_error("Buffer too small for StartCode");
+      throw std::runtime_error("[EasyByteParserCpp]: Buffer too small for StartCode");
     }
     for (size_t i = 0; i < startCode_.size(); ++i) {
       if (static_cast<uint8_t>(data[i]) != startCode_[i]) {
         std::stringstream ss;
-        ss << "Invalid Start Code at byte " << i << ". Expected 0x" << std::hex << std::setw(2) << std::setfill('0')
-           << (int)startCode_[i] << " but got 0x" << (int)(uint8_t)data[i];
+        ss << "[EasyByteParserCpp]: Invalid Start Code at byte " << i << ". Expected 0x" << std::hex << std::setw(2)
+           << std::setfill('0') << (int)startCode_[i] << " but got 0x" << (int)(uint8_t)data[i];
         throw std::runtime_error(ss.str());
       }
     }
@@ -263,42 +267,32 @@ std::map<std::string, ParsedValue> ByteParser::parse(const char* data, size_t si
   // CRC Check
   if (!crcAlgo_.empty() && crcLength_ > 0) {
     if (size < crcLength_) {
-      throw std::runtime_error("Buffer too small for CRC check");
+      throw std::runtime_error("[EasyByteParserCpp]: Buffer too small for CRC check");
     }
 
     if (crcAlgo_ == "CRC16") {
-      if (crcLength_ != 2) {
-        throw std::runtime_error("CRC16 algorithm requires CRCLength=2");
-      }
-
-      // CRC is fixed at the very end of the packet defined by TotalLength
       // Calculate CRC on data range: [0, TotalLength - CRCLength)
       size_t dataLen = totalLength_ - crcLength_;
-
       uint16_t calculated = utils::calculateCRC16Modbus(reinterpret_cast<const uint8_t*>(data), dataLen);
 
       const uint8_t* udata = reinterpret_cast<const uint8_t*>(data);
-      // CRC16 Modbus is usually Little Endian
-      // Location: [TotalLength - 2, TotalLength - 1]
+      // CRC16 Modbus is usually Little Endian (or implementation specific, assuming Little Endian per Utils)
       size_t crcOffset = totalLength_ - 2;
       uint16_t received = udata[crcOffset] | (udata[crcOffset + 1] << 8);
 
       if (calculated != received) {
-        throw std::runtime_error("CRC Check Failed: calculated=" + std::to_string(calculated) +
+        throw std::runtime_error("[EasyByteParserCpp]: CRC Check Failed: calculated=" + std::to_string(calculated) +
                                  ", received=" + std::to_string(received));
       }
     } else {
-      throw std::runtime_error("Unsupported CRC Algorithm: " + crcAlgo_);
+      throw std::runtime_error("[EasyByteParserCpp]: Unsupported CRC Algorithm: " + crcAlgo_);
     }
   }
 
   std::map<std::string, ParsedValue> result;
 
   for (const auto& field : fields_) {
-    if (field.byteOffset + getTypeSize(field.type) > size) {
-      throw std::runtime_error("Field [" + field.name + "] exceeds buffer size (Offset+Size > BufferSize)");
-    }
-
+    // Offset checks already done in validateConfig, but safe to check again or trust
     const char* ptr = data + field.byteOffset;
     ParsedValue val;
 
@@ -331,8 +325,7 @@ std::map<std::string, ParsedValue> ByteParser::parse(const char* data, size_t si
       if (field.bitCount > 0) {
         if (isSigned) uVal = static_cast<uint64_t>(iVal);  // treat as bits
         uVal = (uVal >> field.bitOffset) & ((1ULL << field.bitCount) - 1);
-        // bitfield is unsigned
-        isSigned = false;
+        isSigned = false;  // Result of bitfield extraction is usually treated as unsigned
       }
 
       if (field.scale != 1.0 || field.bias != 0.0) {
@@ -371,10 +364,52 @@ std::string ByteParser::dumpJson(const std::map<std::string, ParsedValue>& data)
     for (size_t i = 0; i < parts.size() - 1; ++i) {
       curr = &((*curr)[parts[i]]);
     }
-
-    // Final value
     std::visit([&](auto&& arg) { (*curr)[parts.back()] = arg; }, val.getValue());
   }
-  return j.dump(4);  // Pretty print
+  return j.dump(4);
 }
+
+std::string ByteParser::getConfigurationChecklist() const {
+  std::stringstream ss;
+  ss << "=== Parser Configuration Checklist ===\n";
+  ss << "1. Total Length: " << totalLength_ << " bytes\n";
+
+  ss << "2. Start Code:   ";
+  if (startCode_.empty()) {
+    ss << "None";
+  } else {
+    ss << "0x";
+    for (auto b : startCode_) ss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+    ss << std::dec << " (Length: " << startCodeLength_ << ")";
+  }
+  ss << "\n";
+
+  ss << "3. CRC Config:   " << (crcAlgo_.empty() ? "None" : crcAlgo_ + " (Length: " + std::to_string(crcLength_) + ")")
+     << "\n";
+
+  ss << "4. Fields Layout (" << fields_.size() << " fields):\n";
+  ss << std::setfill(' ');
+
+  // Sort fields by offset for display
+  auto sortedFields = fields_;
+  std::sort(sortedFields.begin(), sortedFields.end(), [](const FieldDefinition& a, const FieldDefinition& b) {
+    if (a.byteOffset != b.byteOffset) return a.byteOffset < b.byteOffset;
+    return a.bitOffset < b.bitOffset;
+  });
+
+  for (const auto& f : sortedFields) {
+    ss << "   - [Offset " << std::setw(3) << f.byteOffset << "]";
+    if (f.bitCount > 0) {
+      ss << " [Bits " << f.bitOffset << ":" << (f.bitOffset + f.bitCount - 1) << "]";
+    }
+    ss << " " << std::setw(20) << std::left << f.name << " Type: " << std::setw(8) << f.type;
+    if (f.scale != 1.0 || f.bias != 0.0) {
+      ss << " (Scale: " << f.scale << ", Bias: " << f.bias << ")";
+    }
+    ss << "\n";
+  }
+  ss << "======================================\n";
+  return ss.str();
+}
+
 }  // namespace easy_byte_parser

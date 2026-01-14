@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(EasyByteParserCpp VERSION 0.0.2 LANGUAGES CXX)
+project(EasyByteParserCpp VERSION 0.0.3 LANGUAGES CXX)
 
 # Output directories settings
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
